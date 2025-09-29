@@ -16,8 +16,8 @@ export default function GettingStartedPage() {
         </h1>
 
         <p className="text-xl text-on-surface-variant mb-4">
-          We've had to take the difficult decision to shutdown our cloud hosting
-          of Pixeleye.
+          We&apos;ve had to take the difficult decision to shutdown our cloud
+          hosting of Pixeleye.
         </p>
 
         <p className="text-lg text-on-surface-variant mb-8">
