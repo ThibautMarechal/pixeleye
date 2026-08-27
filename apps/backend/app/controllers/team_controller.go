@@ -376,14 +376,14 @@ func GetRepos(c echo.Context) error {
 				}
 			}
 
-			repos, hasNext, err := client.GetInstallationRepositories(c.Request().Context(), start, searchQuery, projectQuery)
+			repos, nextStart, hasNext, err := client.GetInstallationRepositories(c.Request().Context(), start, searchQuery, projectQuery)
 			if err != nil {
 				return err
 			}
 
 			next := ""
 			if hasNext {
-				next = strconv.Itoa(start + len(repos))
+				next = strconv.Itoa(nextStart)
 			}
 
 			return c.JSON(http.StatusOK, models.GitRepoPage{Repos: repos, Next: next})

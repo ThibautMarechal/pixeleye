@@ -53,7 +53,14 @@ type permissionEntry struct {
 // to a single project by its key (e.g. "VIA", the identifier visible everywhere in repo
 // URLs) rather than Bitbucket's own "projectname" filter, which matches the project's
 // display name instead - not what someone typing the key they see in the UI would expect.
-func (c *BitbucketServerClient) GetInstallationRepositories(ctx context.Context, start int, name string, projectKey string) ([]models.GitRepo, bool, error) {
+//
+// Returns the API's own nextPageStart rather than letting the caller assume start+limit:
+// when filtering by permission (the unfiltered "all repos" listing always does), Bitbucket
+// Server paginates over the underlying unfiltered set *before* applying the permission
+// filter, so returned page sizes can be smaller than the requested limit even mid-listing -
+// recomputing the next offset from start+len(repos) skips or duplicates repos across pages
+// once the token can't see every repo in between.
+func (c *BitbucketServerClient) GetInstallationRepositories(ctx context.Context, start int, name string, projectKey string) ([]models.GitRepo, int, bool, error) {
 	query := url.Values{}
 	query.Set("limit", "25")
 	query.Set("start", strconv.Itoa(start))
@@ -75,9 +82,9 @@ func (c *BitbucketServerClient) GetInstallationRepositories(ctx context.Context,
 		if projectKey != "" && strings.Contains(err.Error(), "404") {
 			// No project with that key - treat as "no matches" rather than an error, since
 			// this is reachable just by mistyping the filter.
-			return nil, false, nil
+			return nil, 0, false, nil
 		}
-		return nil, false, err
+		return nil, 0, false, err
 	}
 
 	repos := make([]models.GitRepo, len(page.Values))
@@ -97,7 +104,7 @@ func (c *BitbucketServerClient) GetInstallationRepositories(ctx context.Context,
 		}
 	}
 
-	return repos, !page.IsLastPage, nil
+	return repos, page.NextPageStart, !page.IsLastPage, nil
 }
 
 func (c *BitbucketServerClient) getProjectMembers(ctx context.Context, projectKey string) ([]permissionEntry, error) {
