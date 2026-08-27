@@ -19,11 +19,10 @@ import {
   DropdownMenuTrigger,
 } from "@pixeleye/ui";
 import { InputBase } from "@pixeleye/ui/src/input";
-import { useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useRouter } from "next/navigation";
-import router from "next/router";
 import { useDeferredValue, useMemo, useState } from "react";
 
 dayjs.extend(relativeTime);
@@ -100,31 +99,84 @@ function RepoItem({ repo, handleRepoSelect, isLoading, isDisabled }: RepoItemPro
 }
 
 interface RepoListProps {
-  repos: Repo[];
+  initialRepos: Repo[];
+  initialNext: string;
   team: Team;
   source: Project["source"];
 }
 
-export function RepoList({ repos, team, source }: RepoListProps) {
+// Bitbucket (both Cloud and Server) filter repos server-side by name/project, since a
+// workspace/instance can have thousands of repos - loading them all up front (and only
+// filtering client-side) doesn't scale. GitHub still returns everything in one page, so
+// its project filter input is hidden and search only narrows what's already loaded.
+const SERVER_SIDE_FILTERED_SOURCES: Project["source"][] = ["bitbucket", "bitbucket_server"];
+
+export function RepoList({ initialRepos, initialNext, team, source }: RepoListProps) {
   const [search, setSearch] = useState("");
+  const [project, setProject] = useState("");
   const [sort, setSort] = useState<"name" | "lastUpdated">("lastUpdated");
+
+  const deferredSearch = useDeferredValue(search);
+  const deferredProject = useDeferredValue(project);
+
+  const supportsServerFilter = SERVER_SIDE_FILTERED_SOURCES.includes(source);
 
   const router = useRouter();
 
   const setKey = useKeyStore((state) => state.setKey);
 
+  const isInitialFilter = !deferredSearch && !deferredProject;
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery({
+    queryKey: ["repos", team.id, supportsServerFilter ? deferredSearch : "", supportsServerFilter ? deferredProject : ""],
+    queryFn: ({ pageParam }) => {
+      // api-typify builds a URLSearchParams straight from this object, which stringifies an
+      // `undefined` value to the literal text "undefined" rather than omitting the key - so
+      // only ever include keys that have a real value.
+      const queries: { q?: string; project?: string; next?: string } = {};
+      if (supportsServerFilter && deferredSearch) queries.q = deferredSearch;
+      if (supportsServerFilter && deferredProject) queries.project = deferredProject;
+      if (pageParam) queries.next = pageParam;
+
+      return API.get("/v1/teams/{teamID}/repos", {
+        params: { teamID: team.id },
+        queries,
+      });
+    },
+    initialPageParam: "",
+    getNextPageParam: (lastPage) => lastPage.next || undefined,
+    initialData:
+      isInitialFilter || !supportsServerFilter
+        ? { pages: [{ repos: initialRepos, next: initialNext }], pageParams: [""] }
+        : undefined,
+  });
+
+  const fetchedRepos = useMemo(
+    () => data?.pages.flatMap((page) => page.repos) ?? [],
+    [data]
+  );
+
+  // GitHub always returns everything in one page - keep client-side search for it so typing
+  // still narrows results instead of only relying on (nonexistent) server filtering.
   const filteredRepos = useMemo(() => {
-    if (!search) return repos;
-    return repos.filter((repo) =>
-      repo.name.toLowerCase().includes(search.toLowerCase())
+    if (supportsServerFilter || !deferredSearch) return fetchedRepos;
+    return fetchedRepos.filter((repo) =>
+      repo.name.toLowerCase().includes(deferredSearch.toLowerCase())
     );
-  }, [repos, search]);
+  }, [fetchedRepos, deferredSearch, supportsServerFilter]);
 
   const sortedRepos = useMemo(() => {
+    const copy = [...filteredRepos];
     if (sort === "name") {
-      return filteredRepos.sort((a, b) => a.name.localeCompare(b.name));
+      return copy.sort((a, b) => a.name.localeCompare(b.name));
     } else {
-      return filteredRepos.sort((a, b) =>
+      return copy.sort((a, b) =>
         dayjs(a.lastUpdated).isBefore(dayjs(b.lastUpdated)) ? 1 : -1
       );
     }
@@ -158,7 +210,7 @@ export function RepoList({ repos, team, source }: RepoListProps) {
 
   return (
     <div className="max-w-4xl mx-auto pb-8">
-      <div className="flex items-center justify-end space-x-4 my-8 ">
+      <div className="flex flex-wrap items-center justify-end gap-4 my-8">
         <InputBase
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -166,6 +218,15 @@ export function RepoList({ repos, team, source }: RepoListProps) {
           aria-label="Search for repo names"
           className="max-w-md"
         />
+        {supportsServerFilter && (
+          <InputBase
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            placeholder="Filter by project..."
+            aria-label="Filter by project name"
+            className="max-w-xs"
+          />
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button>Sort</Button>
@@ -186,7 +247,12 @@ export function RepoList({ repos, team, source }: RepoListProps) {
           </DropdownMenuPortal>
         </DropdownMenu>
       </div>
-      {sortedRepos.length === 0 && (
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center space-y-4">
+          <p className="text-on-surface-variant">Loading repositories...</p>
+        </div>
+      )}
+      {!isLoading && sortedRepos.length === 0 && (
         <div className="flex flex-col items-center justify-center space-y-4">
           <p className="text-on-surface-variant">
             No repositories found. Try a different search.
@@ -205,6 +271,17 @@ export function RepoList({ repos, team, source }: RepoListProps) {
             />
           ))}
         </ul>
+      )}
+      {hasNextPage && (
+        <div className="flex justify-center mt-6">
+          <Button
+            variant="outline"
+            loading={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            Load more
+          </Button>
+        </div>
       )}
     </div>
   );
