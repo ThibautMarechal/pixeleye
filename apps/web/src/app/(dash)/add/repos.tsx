@@ -116,7 +116,7 @@ const SERVER_SIDE_FILTERED_SOURCES: Project["source"][] = ["bitbucket", "bitbuck
 export function RepoList({ initialRepos, initialNext, team, source }: RepoListProps) {
   const [search, setSearch] = useState("");
   const [project, setProject] = useState("");
-  const [sort, setSort] = useState<"name" | "lastUpdated">("lastUpdated");
+  const [sort, setSort] = useState<"name" | "lastUpdated">("name");
 
   const deferredSearch = useDeferredValue(search);
   const deferredProject = useDeferredValue(project);
@@ -174,15 +174,28 @@ export function RepoList({ initialRepos, initialNext, team, source }: RepoListPr
   }, [fetchedRepos, deferredSearch, supportsServerFilter]);
 
   const sortedRepos = useMemo(() => {
+    // Bitbucket's repo-listing APIs already return results in alphabetical order, and
+    // pages are fetched in that same order - re-sorting client-side on every "load more"
+    // is both redundant and was the actual cause of items appearing to jump to the top (a
+    // comparator that returns a fixed value for equal inputs isn't a valid sort order, and
+    // effectively reverses the array on each resort). Trust server order for Bitbucket;
+    // only sort client-side for GitHub, which returns everything in one page anyway.
+    if (supportsServerFilter && sort === "name") {
+      return filteredRepos;
+    }
+
     const copy = [...filteredRepos];
     if (sort === "name") {
       return copy.sort((a, b) => a.name.localeCompare(b.name));
     } else {
-      return copy.sort((a, b) =>
-        dayjs(a.lastUpdated).isBefore(dayjs(b.lastUpdated)) ? 1 : -1
-      );
+      return copy.sort((a, b) => {
+        if (!a.lastUpdated && !b.lastUpdated) return 0;
+        if (!a.lastUpdated) return 1;
+        if (!b.lastUpdated) return -1;
+        return dayjs(b.lastUpdated).valueOf() - dayjs(a.lastUpdated).valueOf();
+      });
     }
-  }, [filteredRepos, sort]);
+  }, [filteredRepos, sort, supportsServerFilter]);
 
   const { mutate: createProject, context, isPending } = useMutation({
     mutationFn: (repo: Repo) => {
