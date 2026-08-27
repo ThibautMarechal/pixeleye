@@ -421,12 +421,13 @@ func GetRepos(c echo.Context) error {
 			formattedRepos := make([]models.GitRepo, len(repos.Repositories))
 
 			for i, repo := range repos.Repositories {
+				pushedAt := repo.GetPushedAt().Time
 				formattedRepos[i] = models.GitRepo{
 					ID:            strconv.FormatInt(repo.GetID(), 10),
 					Name:          repo.Name,
 					Private:       repo.Private,
 					URL:           repo.HTMLURL,
-					LastUpdated:   repo.GetPushedAt().Time,
+					LastUpdated:   &pushedAt,
 					Description:   repo.Description,
 					DefaultBranch: repo.DefaultBranch,
 				}

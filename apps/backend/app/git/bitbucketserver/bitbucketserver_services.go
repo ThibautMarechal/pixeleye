@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 
@@ -47,26 +48,35 @@ type permissionEntry struct {
 	Permission string  `json:"permission"`
 }
 
-// GetInstallationRepositories fetches a single page of repos the token can read. name/
-// projectName filter server-side via Bitbucket Server's own "repos" search params instead
-// of the caller having to page through everything - important for instances with thousands
-// of repos across many projects.
-func (c *BitbucketServerClient) GetInstallationRepositories(ctx context.Context, start int, name string, projectName string) ([]models.GitRepo, bool, error) {
+// GetInstallationRepositories fetches a single page of repos the token can read. name
+// filters server-side via Bitbucket Server's own "repos" search param. projectKey scopes
+// to a single project by its key (e.g. "VIA", the identifier visible everywhere in repo
+// URLs) rather than Bitbucket's own "projectname" filter, which matches the project's
+// display name instead - not what someone typing the key they see in the UI would expect.
+func (c *BitbucketServerClient) GetInstallationRepositories(ctx context.Context, start int, name string, projectKey string) ([]models.GitRepo, bool, error) {
 	query := url.Values{}
-	query.Set("permission", "REPO_READ")
 	query.Set("limit", "25")
 	query.Set("start", strconv.Itoa(start))
 	if name != "" {
 		query.Set("name", name)
 	}
-	if projectName != "" {
-		query.Set("projectname", projectName)
+
+	var path string
+	if projectKey != "" {
+		path = fmt.Sprintf("/rest/api/1.0/projects/%s/repos?%s", url.PathEscape(strings.ToUpper(projectKey)), query.Encode())
+	} else {
+		query.Set("permission", "REPO_READ")
+		path = "/rest/api/1.0/repos?" + query.Encode()
 	}
 
 	var page pagedResponse[bbsRepo]
 
-	path := "/rest/api/1.0/repos?" + query.Encode()
 	if err := c.get(ctx, path, &page); err != nil {
+		if projectKey != "" && strings.Contains(err.Error(), "404") {
+			// No project with that key - treat as "no matches" rather than an error, since
+			// this is reachable just by mistyping the filter.
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 

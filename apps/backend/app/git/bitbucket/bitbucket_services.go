@@ -111,7 +111,9 @@ func (c *BitbucketCloudClient) GetInstallationRepositories(ctx context.Context, 
 			terms = append(terms, fmt.Sprintf(`name~"%s"`, escapeBBQL(name)))
 		}
 		if project != "" {
-			terms = append(terms, fmt.Sprintf(`project.name~"%s"`, escapeBBQL(project)))
+			// Match by project key (e.g. "VIA"), the identifier visible everywhere in
+			// Bitbucket's UI/URLs, not the (possibly different) display name.
+			terms = append(terms, fmt.Sprintf(`project.key="%s"`, escapeBBQL(strings.ToUpper(project))))
 		}
 		if len(terms) > 0 {
 			query.Set("q", strings.Join(terms, " AND "))
@@ -132,7 +134,7 @@ func (c *BitbucketCloudClient) GetInstallationRepositories(ctx context.Context, 
 		repoURL := r.Links.HTML.Href
 		branch := r.MainBranch.Name
 
-		repos[i] = models.GitRepo{
+		repo := models.GitRepo{
 			ID:            r.UUID,
 			Name:          &r.Name,
 			Private:       &isPrivate,
@@ -140,6 +142,12 @@ func (c *BitbucketCloudClient) GetInstallationRepositories(ctx context.Context, 
 			Description:   &desc,
 			DefaultBranch: &branch,
 		}
+
+		if updatedOn, err := time.Parse(time.RFC3339, r.UpdatedOn); err == nil {
+			repo.LastUpdated = &updatedOn
+		}
+
+		repos[i] = repo
 	}
 
 	return repos, page.Next, nil

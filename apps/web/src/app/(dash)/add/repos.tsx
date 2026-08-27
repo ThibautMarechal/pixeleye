@@ -53,9 +53,11 @@ function RepoItem({ repo, handleRepoSelect, isLoading, isDisabled }: RepoItemPro
                 <span className="mr-1 truncate">{repo.name}</span>
                 <ArrowTopRightOnSquareIcon height="1em" width="1em" />
               </a>
-              <p className="flex-shrink-0 ml-2 font-normal text-on-surface-variant">
-                last updated {dayjs().to(dayjs(repo.lastUpdated))}
-              </p>
+              {repo.lastUpdated && (
+                <p className="flex-shrink-0 ml-2 font-normal text-on-surface-variant">
+                  last updated {dayjs().to(dayjs(repo.lastUpdated))}
+                </p>
+              )}
             </div>
             {repo.description && (
               <div className="flex flex-col mt-2 mr-8">
@@ -222,8 +224,8 @@ export function RepoList({ initialRepos, initialNext, team, source }: RepoListPr
           <InputBase
             value={project}
             onChange={(e) => setProject(e.target.value)}
-            placeholder="Filter by project..."
-            aria-label="Filter by project name"
+            placeholder="Filter by project key..."
+            aria-label="Filter by project key"
             className="max-w-xs"
           />
         )}
